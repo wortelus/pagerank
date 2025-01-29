@@ -5,6 +5,6 @@
 #ifndef CONSTS_H
 #define CONSTS_H
 
-static constexpr double EPSILON = 1e-8;
+static constexpr double EPSILON = 1e-6;
 
 #endif //CONSTS_H

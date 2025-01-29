@@ -33,7 +33,7 @@ void benchmark(const char* filename, int max_iterations, int benchmark_iteration
     std::cout << "Benchmark for " << filename << " with " << benchmark_iterations << " iterations." << std::endl;
     std::cout << "Parallel PageRank Avg Time: " << avg_time_parallel << "s." << std::endl;
     std::cout << "Serial PageRank Avg Time: " << avg_time_serial << "s." << std::endl;
-    std::cout << "Speedup: " << avg_time_serial / avg_time_parallel << "s." << std::endl;
+    std::cout << "Speedup: " << avg_time_serial / avg_time_parallel << "-times." << std::endl;
 }
 
 void benchmark_loading(const char* filename, int benchmark_iterations) {
@@ -60,18 +60,25 @@ void benchmark_loading(const char* filename, int benchmark_iterations) {
     std::cout << "Benchmark for " << filename << " with " << benchmark_iterations << " iterations." << std::endl;
     std::cout << "Parallel file loading Avg Time: " << avg_time_parallel << "s." << std::endl;
     std::cout << "Serial file loading Avg Time: " << avg_time_serial << "s." << std::endl;
-    std::cout << "Speedup: " << avg_time_serial / avg_time_parallel << "s." << std::endl;
+    std::cout << "Speedup: " << avg_time_serial / avg_time_parallel << "-times." << std::endl;
 }
 
 int main() {
-    int iterations = 0;
     std::cout << "Parallel PageRank" << std::endl;
+
     auto start_time = std::chrono::high_resolution_clock::now();
     DD_Pagerank dd_pagerank("web-BerkStan.txt", true);
-    const auto pr = dd_pagerank.page_rank(1000, true, &iterations);
     auto end_time = std::chrono::high_resolution_clock::now();
     std::cout <<
-        "Time (loading + " << iterations << " iterations) of the parallel one: " <<
+    "Time (loading) of the parallel one: " <<
+    std::chrono::duration<double>(end_time - start_time).count() << "s." << std::endl;
+
+    int iterations = 0;
+    start_time = std::chrono::high_resolution_clock::now();
+    const auto pr = dd_pagerank.page_rank(1000, true, &iterations);
+    end_time = std::chrono::high_resolution_clock::now();
+    std::cout <<
+        "Time (" << iterations << " iterations) of the parallel one: " <<
         std::chrono::duration<double>(end_time - start_time).count() << "s." << std::endl;
     dd_pagerank.eval(pr);
     
