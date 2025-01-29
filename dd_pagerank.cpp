@@ -21,6 +21,10 @@
 #include "consts.h"
 #include "edge.h"
 
+///
+/// @brief Sériový pro načtení grafu ze souboru
+/// @param filename Cesta k souboru s grafem
+///
 DD_Pagerank::DD_Pagerank(const char* filename)
 {
     std::ifstream file(filename);
@@ -112,6 +116,11 @@ DD_Pagerank::DD_Pagerank(const char* filename)
         std::endl;
 }
 
+///
+/// @brief Získání velikosti souboru
+/// @param fname Cesta k souboru
+/// @return Velikost souboru v bytech
+///
 size_t DD_Pagerank::getFileSize(const char* fname)
 {
     struct stat st{};
@@ -123,6 +132,11 @@ size_t DD_Pagerank::getFileSize(const char* fname)
     return st.st_size;
 }
 
+///
+/// @brief OpenMP paralelní/sériový konstruktor pro načtení grafu ze souboru
+/// @param filename Cesta k souboru
+/// @param parallel Paralelní zpracování (true) nebo sériové (false)
+/// 
 DD_Pagerank::DD_Pagerank(const char* filename, bool parallel)
 {
     std::cout << "Loading graph from " << filename << std::endl;
@@ -280,7 +294,7 @@ DD_Pagerank::DD_Pagerank(const char* filename, bool parallel)
     }
 
     this->node_count = max_node + 1;
-    this->edge_count = (int)edges.size();
+    this->edge_count = static_cast<int>(edges.size());
 
     this->outgoing_count.resize(node_count, 0);
     this->incoming_count.resize(node_count, 0);
@@ -289,13 +303,17 @@ DD_Pagerank::DD_Pagerank(const char* filename, bool parallel)
 
 
     // Tímto to pravděpodobně moc nezoptimalizujeme, ale i tak v rámci demonstrace :-)
-#pragma omp parallel if(parallel)
+#pragma omp parallel if(parallel) default(none) shared(edges, outgoing_count, incoming_count)
     {
 #pragma omp for
-        for (int i = 0; i < (int)edges.size(); i++)
+        for (auto & edge : edges)
         {
-            int f = edges[i].from;
-            int t = edges[i].to;
+            // ReSharper disable CppDFAUnusedValue
+            // ReSharper disable CppDFAUnreadVariable
+            int f = edge.from;
+            int t = edge.to;
+            // ReSharper restore CppDFAUnreadVariable
+            // ReSharper restore CppDFAUnusedValue
 
 #pragma omp atomic
             outgoing_count[f]++;
@@ -313,13 +331,17 @@ DD_Pagerank::DD_Pagerank(const char* filename, bool parallel)
     std::vector<int> out_idx(node_count, 0);
     std::vector<int> in_idx(node_count, 0);
 
-#pragma omp parallel if(parallel)
+#pragma omp parallel if(parallel) default(none) shared(edges, outgoing_edges, incoming_edges, out_idx, in_idx)
     {
 #pragma omp for
-        for (int i = 0; i < (int)edges.size(); i++)
+        for (auto & edge : edges)
         {
-            int f = edges[i].from;
-            int t = edges[i].to;
+            // ReSharper disable CppDFAUnreadVariable
+            // ReSharper disable CppDFAUnusedValue
+            int f = edge.from;
+            int t = edge.to;
+            // ReSharper restore CppDFAUnusedValue
+            // ReSharper restore CppDFAUnreadVariable
 
             int pos_f, pos_t;
 #pragma omp atomic capture
@@ -341,6 +363,12 @@ DD_Pagerank::DD_Pagerank(const char* filename, bool parallel)
         << " nodes and " << this->edge_count << " edges." << std::endl;
 }
 
+///
+/// @brief OpenMP paralelní/sériový výpočet PageRanku
+/// @param max_iter Maximální počet iterací
+/// @param parallel Paralelní výpočet (true) nebo sériový (false)
+/// @param out_iterations Počet iterací (výstup)
+/// @return Vektor PageRanků (0-based)
 std::vector<double> DD_Pagerank::page_rank(
     size_t max_iter, // Maximální počet iterací
     bool parallel, // true => OpenMP paralelně, false => sériově
@@ -360,7 +388,7 @@ std::vector<double> DD_Pagerank::page_rank(
         // Výpočet PR(u)
         // Pokud parallel == true, bude použito #pragma omp parallel
         int active_count = 0;
-#pragma omp parallel for if(parallel) reduction(+:active_count)
+#pragma omp parallel for if(parallel) reduction(+:active_count) default(none) shared(node_count, pr, new_pr, incoming_edges)
         for (int u = 0; u < node_count; u++)
         {
             double sum = 0.0;
@@ -383,14 +411,14 @@ std::vector<double> DD_Pagerank::page_rank(
         if (active_count == 0) break;
 
         // Nastavení bool masky aktivních uzlů
-#pragma omp parallel for if(parallel)
+#pragma omp parallel for if(parallel) default(none) shared(active, pr, new_pr)
         for (int u = 0; u < node_count; u++)
         {
             active[u] = std::abs(new_pr[u] - pr[u]) > EPSILON;
         }
 
         // new_pr -> pr na konci iterace
-#pragma omp parallel for if(parallel)
+#pragma omp parallel for if(parallel) default(none) shared(pr, new_pr)
         for (int u = 0; u < node_count; u++)
         {
             pr[u] = new_pr[u];
@@ -405,32 +433,41 @@ std::vector<double> DD_Pagerank::page_rank(
     return pr;
 }
 
+///
+/// @brief Inicializace PageRanku
+/// @param pr Reference na vektor PageRanků
+/// @param parallel Paralelní inicializace (true) nebo sériová (false)
+/// 
 void DD_Pagerank::init_pr(std::vector<double>& pr, bool parallel) const
 {
     // Paralelní inicializace 1/N
     double init_pr = 1.0 / static_cast<double>(node_count);
-#pragma omp parallel for if(parallel)
+#pragma omp parallel for if(parallel) default(none) shared(pr, init_pr)
     for (int i = 0; i < node_count; i++)
     {
         pr[i] = init_pr;
     }
 }
 
+///
+/// @brief Výpis top N uzlů podle PageRanku
+/// @param pr Vektor PageRanků
+/// @param N Počet top uzlů
+/// 
 void DD_Pagerank::eval(std::vector<double> pr, const int N) const
 {
     std::vector<std::pair<size_t, double>> node_ranks;
     node_ranks.reserve(node_count);
 
-    // Paralelní převod na vektor<index, pagerank>
-#pragma omp parallel for
+    // Převod na vektor<index, pagerank>
+    // TODO: paralelizovat ?
     for (int i = 0; i < node_count; i++)
     {
-#pragma omp critical
         node_ranks.emplace_back(i, pr[i]);
     }
 
     // Seřazení podle PageRanku
-    std::sort(node_ranks.begin(), node_ranks.end(), [](const auto& a, const auto& b)
+    std::ranges::sort(node_ranks, [](const auto& a, const auto& b)
     {
         return a.second > b.second;
     });
@@ -439,6 +476,7 @@ void DD_Pagerank::eval(std::vector<double> pr, const int N) const
     printf("Top 5 nodes by PageRank:\n");
     for (int i = 0; i < std::min<size_t>(N, node_ranks.size()); i++)
     {
+        // 0-based -> 1-based (proto +1)
         printf("Node %zu: %.10f\n", node_ranks[i].first + 1, node_ranks[i].second);
     }
 }
