@@ -17,8 +17,13 @@ $ cmake --build .
 
 ### Spuštění
 Program byl testován na síti `web-BerkStan.txt.gz`
+
+Druhý argument je cesta k souboru s daty. 
+Pokud není zadán, použije se výchozí soubor `web-BerkStan.txt`.
+
 ```bash
-$ ./PageRank
+$ cd build
+$ ./pagerank ../web-BerkStan.txt
 ```
 
 

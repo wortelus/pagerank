@@ -1,5 +1,4 @@
 #include <chrono>
-#include <omp.h>
 #include <iostream>
 
 #include "dd_pagerank.h"
@@ -63,11 +62,17 @@ void benchmark_loading(const char* filename, int benchmark_iterations) {
     std::cout << "Speedup: " << avg_time_serial / avg_time_parallel << "-times." << std::endl;
 }
 
-int main() {
+int main(int argc, char* argv[]) {
+    std::string filename = "web-BerkStan.txt"; // Default filename
+
+    if (argc == 2) {
+        filename = argv[1];
+    }
+
     std::cout << "Parallel PageRank" << std::endl;
 
     auto start_time = std::chrono::high_resolution_clock::now();
-    DD_Pagerank dd_pagerank("web-BerkStan.txt", true);
+    DD_Pagerank dd_pagerank(filename.c_str(), true);
     auto end_time = std::chrono::high_resolution_clock::now();
     std::cout <<
     "Time (loading) of the parallel one: " <<

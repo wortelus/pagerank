@@ -5,6 +5,7 @@
 #ifndef DD_PAGERANK_H
 #define DD_PAGERANK_H
 #include <cstdint>
+#include <cstddef>
 #include <vector>
 
 
