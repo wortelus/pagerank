@@ -15,7 +15,7 @@ endif ()
 message(STATUS "Checking OpenMP")
 find_package(OpenMP REQUIRED)
 
-add_executable(pagerank main.cpp dd_pagerank.cpp dd_pagerank.h edge.h consts.h)
+add_executable(pagerank src/main.cpp src/dd_pagerank.cpp src/dd_pagerank.h src/edge.h src/consts.h)
 
 if (OpenMP_CXX_FOUND)
     target_link_libraries(pagerank PUBLIC OpenMP::OpenMP_CXX)
