@@ -21,6 +21,11 @@ class DD_Pagerank
 
     static size_t getFileSize(const char* fname);
     void init_pr(std::vector<double>& pr, bool parallel) const;
+    static int pagerank_openmp_avx2(const std::vector<std::vector<int>>& incoming_edges,
+                                    const std::vector<int>& outgoing_count,
+                                    const std::vector<double>& pr, std::vector<double>& new_pr,
+                                    int node_count,
+                                    bool parallel, double d);
 public:
     explicit DD_Pagerank(const char* filename);
     DD_Pagerank(const char* filename, bool parallel);

@@ -3,7 +3,10 @@
 //
 
 #include "dd_pagerank.h"
+#include "consts.h"
+#include "edge.h"
 
+#include <omp.h>
 #include <sys/stat.h>
 
 #include <algorithm>
@@ -16,10 +19,9 @@
 #include <vector>
 #include <cwchar>
 #include <iostream>
-#include <omp.h>
 
-#include "consts.h"
-#include "edge.h"
+// Intel AVX2
+#include <immintrin.h> // AVX2
 
 ///
 /// @brief Sériový pro načtení grafu ze souboru
@@ -306,7 +308,7 @@ DD_Pagerank::DD_Pagerank(const char* filename, bool parallel)
 #pragma omp parallel if(parallel) default(none) shared(edges, outgoing_count, incoming_count)
     {
 #pragma omp for
-        for (auto & edge : edges)
+        for (auto& edge : edges)
         {
             // ReSharper disable CppDFAUnusedValue
             // ReSharper disable CppDFAUnreadVariable
@@ -334,7 +336,7 @@ DD_Pagerank::DD_Pagerank(const char* filename, bool parallel)
 #pragma omp parallel if(parallel) default(none) shared(edges, outgoing_edges, incoming_edges, out_idx, in_idx)
     {
 #pragma omp for
-        for (auto & edge : edges)
+        for (auto& edge : edges)
         {
             // ReSharper disable CppDFAUnreadVariable
             // ReSharper disable CppDFAUnusedValue
@@ -387,25 +389,7 @@ std::vector<double> DD_Pagerank::page_rank(
     {
         // Výpočet PR(u)
         // Pokud parallel == true, bude použito #pragma omp parallel
-        int active_count = 0;
-#pragma omp parallel for if(parallel) reduction(+:active_count) default(none) shared(node_count, pr, new_pr, incoming_edges)
-        for (int u = 0; u < node_count; u++)
-        {
-            double sum = 0.0;
-            for (auto v : incoming_edges[u])
-            {
-                double v_pr = pr[v];
-                int v_outgoing_count = outgoing_count[v];
-                sum += v_pr / v_outgoing_count;
-            }
-
-            new_pr[u] = (1.0 - this->d) / node_count + this->d * sum;
-
-            if (std::abs(new_pr[u] - pr[u]) > EPSILON)
-            {
-                active_count++;
-            }
-        }
+        int active_count = pagerank_openmp_avx2(incoming_edges, outgoing_count, pr, new_pr, node_count, parallel, d);
 
         // Pokud žádný uzel neprošel významnou změnou, skončíme
         if (active_count == 0) break;
@@ -433,8 +417,84 @@ std::vector<double> DD_Pagerank::page_rank(
     return pr;
 }
 
+int DD_Pagerank::pagerank_openmp_avx2(const std::vector<std::vector<int>>& incoming_edges,
+                                      const std::vector<int>& outgoing_count,
+                                      const std::vector<double>& pr,
+                                      std::vector<double>& new_pr,
+                                      int node_count,
+                                      bool parallel,
+                                      double d)
+{
+    int active_count = 0;
+
+#pragma omp parallel for if(parallel) reduction(+:active_count) default(none) shared(node_count, pr, new_pr, incoming_edges, outgoing_count, d)
+    for (int u = 0; u < node_count; u++)
+    {
+        size_t edge_count = incoming_edges[u].size();
+        double sum = 0.0;
+
+        // Intel AVX2 - Vynulování 256-bitového AVX2 registru (4x double)
+        __m256d vec_sum = _mm256_setzero_pd();
+
+        // Intel AVX2 Zpracování po čtveřicích
+        int v = 0;
+        for (; v + 3 < edge_count; v += 4)
+        {
+            __m256d v_pr = _mm256_set_pd(
+                pr[incoming_edges[u][v + 3]], pr[incoming_edges[u][v + 2]],
+                pr[incoming_edges[u][v + 1]], pr[incoming_edges[u][v]]);
+
+            __m256d v_outgoing = _mm256_set_pd(
+                outgoing_count[incoming_edges[u][v + 3]], outgoing_count[incoming_edges[u][v + 2]],
+                outgoing_count[incoming_edges[u][v + 1]], outgoing_count[incoming_edges[u][v]]);
+
+            __m256d div_result = _mm256_div_pd(v_pr, v_outgoing);
+
+            // Clang-Tidy:
+            // '_mm256_add_pd' is a non-portable x86_64 intrinsic function
+#ifndef __AVX2__
+#error "AVX2 support is required."
+#endif
+            vec_sum = _mm256_add_pd(vec_sum, div_result); // NOLINT(*-simd-intrinsics)
+        }
+
+        // 4 -> 2 -> 1 součet
+        //
+        // { a, b, c, d } → { a+b, c+d, a+b, c+d }
+        vec_sum = _mm256_hadd_pd(vec_sum, vec_sum);
+
+        // Clang-Tidy:
+        // '_mm_add_pd' is a non-portable x86_64 intrinsic function
+#ifndef __AVX2__
+#error "AVX2 support is required."
+#endif
+        __m128d sum128 = _mm_add_pd( // NOLINT(*-simd-intrinsics)
+            _mm256_extractf128_pd(vec_sum, 0), // { a+b, c+d }
+            _mm256_extractf128_pd(vec_sum, 1) // { a+b, c+d }
+        );
+        sum += _mm_cvtsd_f64(sum128); // Finální součet
+
+        // Zbytek (3 a méně) - sériově (non-AVX2)
+        for (; v < edge_count; v++)
+        {
+            sum += pr[incoming_edges[u][v]] / outgoing_count[incoming_edges[u][v]];
+        }
+
+        // Nový PageRank
+        new_pr[u] = (1.0 - d) / node_count + d * sum;
+
+        // Přidání aktivního uzlu
+        if (std::abs(new_pr[u] - pr[u]) > EPSILON)
+        {
+            active_count++;
+        }
+    }
+
+    return active_count;
+}
+
 ///
-/// @brief Inicializace PageRanku
+/// @brief OpenMP & AVX2 Inicializace PageRanku
 /// @param pr Reference na vektor PageRanků
 /// @param parallel Paralelní inicializace (true) nebo sériová (false)
 /// 
@@ -442,10 +502,17 @@ void DD_Pagerank::init_pr(std::vector<double>& pr, bool parallel) const
 {
     // Paralelní inicializace 1/N
     double init_pr = 1.0 / static_cast<double>(node_count);
+
 #pragma omp parallel for if(parallel) default(none) shared(pr, init_pr)
     for (int i = 0; i < node_count; i++)
     {
-        pr[i] = init_pr;
+#pragma omp simd
+        for (int j = 0; j < 4; j++)
+        {
+            int index = i + j;
+            if (index < node_count)
+                pr[index] = init_pr;
+        }
     }
 }
 
